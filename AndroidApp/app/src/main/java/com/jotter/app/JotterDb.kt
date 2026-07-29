@@ -279,21 +279,38 @@ class JotterDb(context: Context) : SQLiteOpenHelper(context, "jotter_native.db",
     }
 
     fun listNotes(query: String = "", notebookId: String? = null, tagId: String? = null, includeArchived: Boolean = false): List<Note> {
-        val q = "%${query.lowercase()}%"
+        val selectionArgs = mutableListOf<String>()
+        val queryBuilder = StringBuilder("n.is_deleted = 0")
+
+        if (query.isNotBlank()) {
+            val q = "%${query.lowercase()}%"
+            queryBuilder.append(" AND (lower(n.title) LIKE ? OR lower(n.content) LIKE ? OR lower(a.file_name) LIKE ? OR lower(a.extracted_text) LIKE ?)")
+            repeat(4) { selectionArgs.add(q) }
+        }
+
+        if (notebookId != null) {
+            queryBuilder.append(" AND n.notebook_id = ?")
+            selectionArgs.add(notebookId)
+        }
+
+        if (tagId != null) {
+            queryBuilder.append(" AND nt.tag_id = ?")
+            selectionArgs.add(tagId)
+        }
+
+        if (!includeArchived) {
+            queryBuilder.append(" AND n.is_archived = 0")
+        }
+
         val cursor = readableDatabase.rawQuery(
             """
             SELECT DISTINCT n.* FROM notes n
             LEFT JOIN attachments a ON a.note_id = n.id
             LEFT JOIN note_tags nt ON nt.note_id = n.id
-            WHERE n.is_deleted = 0 AND (
-                ? = '%%' OR lower(n.title) LIKE ? OR lower(n.content) LIKE ? OR lower(a.file_name) LIKE ? OR lower(a.extracted_text) LIKE ?
-            )
-            AND (? IS NULL OR n.notebook_id = ?)
-            AND (? IS NULL OR nt.tag_id = ?)
-            AND (? = 1 OR n.is_archived = 0)
+            WHERE ${queryBuilder}
             ORDER BY n.is_pinned DESC, n.updated_at DESC
             """.trimIndent(),
-            arrayOf(q, q, q, q, q, notebookId, notebookId, tagId, tagId, if (includeArchived) "1" else "0")
+            selectionArgs.toTypedArray()
         )
         return cursor.use {
             buildList {
