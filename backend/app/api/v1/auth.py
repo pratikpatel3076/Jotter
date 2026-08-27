@@ -19,6 +19,7 @@ from app.core.security import (
     hash_password, verify_password,
     create_access_token, create_refresh_token, decode_token,
     create_password_reset_token, verify_password_reset_token,
+    encrypt_value, decrypt_value,
 )
 from app.core.config import settings
 from app.services.email import send_password_reset_email
@@ -54,6 +55,22 @@ async def signup(body: SignupRequest, db: AsyncSession = Depends(get_db)):
         is_active=True,
         is_verified=True,
         last_login_at=datetime.now(timezone.utc),
+    )
+    db.add(user)
+    await db.flush()
+
+    access, refresh = _make_tokens(user.id)
+    db.add(UserSession(
+        user_id=user.id,
+        refresh_token_hash=_hash_token(refresh),
+        expires_at=datetime.now(timezone.utc) + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS),
+    ))
+    await db.commit()
+
+    return AuthResponse(
+        user=UserResponse(id=user.id, email=user.email, full_name=user.full_name, is_active=user.is_active),
+        tokens=TokenResponse(access_token=access, refresh_token=refresh),
+        encrypted_master_key=user.encrypted_master_key or "",
     )
 
 
@@ -103,23 +120,6 @@ async def google_auth(body: GoogleAuthRequest, db: AsyncSession = Depends(get_db
         expires_at=datetime.now(timezone.utc) + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS),
     ))
     await db.execute(update(User).where(User.id == user.id).values(last_login_at=datetime.now(timezone.utc)))
-    await db.commit()
-
-    return AuthResponse(
-        user=UserResponse(id=user.id, email=user.email, full_name=user.full_name, is_active=user.is_active),
-        tokens=TokenResponse(access_token=access, refresh_token=refresh),
-        encrypted_master_key=user.encrypted_master_key or "",
-    )
-    db.add(user)
-    await db.flush()
-
-    access, refresh = _make_tokens(user.id)
-    session = UserSession(
-        user_id=user.id,
-        refresh_token_hash=_hash_token(refresh),
-        expires_at=datetime.now(timezone.utc) + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS),
-    )
-    db.add(session)
     await db.commit()
 
     return AuthResponse(
@@ -282,14 +282,15 @@ async def connect_google_drive(
     if body.expires_in:
         expires_at = datetime.now(timezone.utc) + timedelta(seconds=body.expires_in)
     existing = await db.scalar(select(GoogleDriveConnection).where(GoogleDriveConnection.user_id == current_user.id))
+    encrypted_token = encrypt_value(body.access_token)
     if existing:
-        existing.access_token = body.access_token
+        existing.access_token = encrypted_token
         existing.token_expires_at = expires_at
         existing.is_active = True
     else:
         db.add(GoogleDriveConnection(
             user_id=current_user.id,
-            access_token=body.access_token,
+            access_token=encrypted_token,
             token_expires_at=expires_at,
             is_active=True,
         ))

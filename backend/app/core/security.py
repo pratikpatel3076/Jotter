@@ -1,11 +1,28 @@
 from datetime import datetime, timedelta, timezone
 from typing import Optional
+import base64
+import hashlib
+
 import bcrypt
+from cryptography.fernet import Fernet
 from jose import JWTError, jwt
 from itsdangerous import URLSafeTimedSerializer
 from app.core.config import settings
 
 serializer = URLSafeTimedSerializer(settings.SECRET_KEY)
+
+
+def _fernet() -> Fernet:
+    key = hashlib.sha256(settings.SECRET_KEY.encode()).digest()
+    return Fernet(base64.urlsafe_b64encode(key))
+
+
+def encrypt_value(plaintext: str) -> str:
+    return _fernet().encrypt(plaintext.encode()).decode()
+
+
+def decrypt_value(ciphertext: str) -> str:
+    return _fernet().decrypt(ciphertext.encode()).decode()
 
 
 def hash_password(password: str) -> str:
