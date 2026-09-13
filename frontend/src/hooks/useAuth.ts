@@ -130,7 +130,7 @@ export function useAuth() {
     try {
       const idToken = await requestGoogleIdToken()
       const deviceSecretKey = 'google_vault_secret'
-      let deviceSecret = localStorage.getItem(deviceSecretKey)
+      let deviceSecret = sessionStorage.getItem(deviceSecretKey)
       let recoveryKey: string | undefined
       let payload: { id_token: string; encrypted_master_key?: string; kdf_salt?: string; recovery_bundle?: string } = { id_token: idToken }
 
@@ -153,7 +153,7 @@ export function useAuth() {
       if (!encrypted_master_key) throw new Error('No encrypted vault returned')
       const wrapped = JSON.parse(encrypted_master_key)
       const masterKey = await unwrapMasterKey(wrapped, deviceSecret)
-      localStorage.setItem(deviceSecretKey, deviceSecret)
+      sessionStorage.setItem(deviceSecretKey, deviceSecret)
       localStorage.setItem('access_token', tokens.access_token)
       localStorage.setItem('refresh_token', tokens.refresh_token)
       await saveUser({
