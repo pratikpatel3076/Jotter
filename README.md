@@ -8,6 +8,8 @@ Jotter combines the convenience of a modern notes app with genuine end-to-end en
 
 The app works offline by default. Notes live in IndexedDB (browser) or SQLite (mobile) and sync to the server only when you're connected. If you go offline for a week, nothing breaks.
 
+Storage is encrypted at rest too. Whether a note is sitting in the browser vault or on your phone's SQLite file, it's ciphertext until you're actively reading it.
+
 ## Getting Jotter Running
 
 ### Prerequisites
@@ -69,6 +71,16 @@ Jotter uses a zero-knowledge architecture. Here's the chain:
 5. **Recovery** — A 32-byte hex recovery key lets you regain access if you forget your password, without losing data.
 6. **Offline auth** — The local vault stores enough encrypted material to authenticate without the server.
 
+### Android at-rest encryption
+
+The native Android app extends the zero-knowledge model to on-device storage:
+
+1. **Keystore-wrapped password** — Your app password is encrypted with a hardware-backed AndroidKeyStore AES-256 key (StrongBox where available) and stored in protected prefs.
+2. **Encrypted SQLite** — Note titles and content in `jotter_native.db` are AES-256-GCM encrypted with a key derived from your password via PBKDF2 (310k iterations, SHA-256).
+3. **Decrypt in memory only** — Notes are decrypted for display; search and filtering run in memory over decrypted content instead of SQL.
+4. **No backup leaks** — The encrypted database and the keystore-wrapped password prefs are excluded from cloud backup and device transfer.
+5. **HTTPS-only sync** — Production builds default to `https://api.jotter.app/api` and reject any cleartext endpoint.
+
 ## Project Layout
 
 ```
@@ -87,7 +99,7 @@ Jotter/
 │   │   └── db/           IndexedDB schema and vault
 │   └── public/           Static assets, service worker, icons
 ├── AndroidApp/           Native Android shell (Kotlin, Capacitor)
-│   └── app/src/main/     Activity, DB, sync client, notifications
+│   └── app/src/main/     Activity, encrypted DB, sync client, notifications
 ├── start-backend.bat     Windows shortcut to launch the API
 └── start-frontend.bat    Windows shortcut to launch the dev server
 ```
@@ -114,6 +126,7 @@ Jotter/
 |---|---|
 | Signup, login, password reset | Shipped |
 | End-to-end AES-256-GCM encryption | Shipped |
+| On-device note encryption (Android) | Shipped |
 | Offline-first with sync queue | Shipped |
 | Rich text editing (TipTap) | Shipped |
 | Checklists | Shipped |
@@ -135,7 +148,7 @@ Jotter/
 | UI | React, TypeScript, Tailwind CSS, TipTap |
 | State | Zustand, TanStack Query |
 | Local storage | IndexedDB (web), SQLite (mobile) |
-| Crypto | Web Crypto API (AES-GCM, PBKDF2) |
+| Crypto | Web Crypto API, AndroidKeyStore (AES-256-GCM, PBKDF2) |
 | Server | FastAPI, Python |
 | Database | MySQL 8.0, SQLAlchemy async |
 | Auth | JWT access + refresh tokens, bcrypt |
