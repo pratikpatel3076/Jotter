@@ -63,7 +63,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        db = JotterDb(this)
+        db = JotterDb(this, JotterDb.getUserPassword(this))
         attachmentStore = AttachmentStore(this)
         syncClient = SyncClient(this)
         handleShareIntent(intent)

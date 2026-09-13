@@ -2,13 +2,81 @@ package com.jotter.app
 
 import android.content.ContentValues
 import android.content.Context
+import android.content.SharedPreferences
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
+import android.security.keystore.KeyGenParameterSpec
+import android.security.keystore.KeyProperties
+import java.security.KeyStore
+import java.security.SecureRandom
+import java.util.Base64
 import java.util.UUID
+import javax.crypto.Cipher
+import javax.crypto.KeyGenerator
+import javax.crypto.SecretKeyFactory
+import javax.crypto.spec.GCMParameterSpec
+import javax.crypto.spec.PBEKeySpec
+import javax.crypto.spec.SecretKeySpec
 
-class JotterDb(context: Context) : SQLiteOpenHelper(context, "jotter_native.db", null, 4) {
+class JotterDb(context: Context, private val userPassword: String) : SQLiteOpenHelper(context, "jotter_native.db", null, 4) {
+    private val prefs: SharedPreferences = context.getSharedPreferences("jotter_crypto", Context.MODE_PRIVATE)
     companion object {
         const val DEFAULT_NOTEBOOK_ID = "default"
+        private const val ALGORITHM = "AES/GCM/NoPadding"
+        private const val GCM_TAG_LENGTH = 128
+        private const val SALT_KEY = "enc_salt"
+        private const val USER_PASSWORD_KEY = "user_password_enc"
+        private const val USER_PASSWORD_IV_KEY = "user_password_iv"
+        private const val KEYSTORE_KEY_ALIAS = "jotter_db_key"
+        private const val PBKDF2_ITERATIONS = 310_000
+        private const val KEY_LENGTH = 256
+
+        private fun getOrCreateKeystoreKey(): javax.crypto.SecretKey {
+            val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+            keyStore.getEntry(KEYSTORE_KEY_ALIAS, null)?.let {
+                return (it as KeyStore.SecretKeyEntry).secretKey
+            }
+            val kg = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
+            kg.init(
+                KeyGenParameterSpec.Builder(
+                    KEYSTORE_KEY_ALIAS,
+                    KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
+                )
+                    .setKeySize(256)
+                    .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                    .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                    .setIsStrongBoxBacked(true)
+                    .build()
+            )
+            return kg.generateKey()
+        }
+
+        fun getUserPassword(context: Context): String {
+            val prefs = context.getSharedPreferences("jotter_crypto", Context.MODE_PRIVATE)
+            val encrypted = prefs.getString(USER_PASSWORD_KEY, null) ?: return ""
+            val ivStr = prefs.getString(USER_PASSWORD_IV_KEY, null) ?: return ""
+            return try {
+                val keystoreKey = getOrCreateKeystoreKey()
+                val iv = Base64.decode(ivStr, Base64.DEFAULT)
+                val cipher = Cipher.getInstance(ALGORITHM)
+                cipher.init(Cipher.DECRYPT_MODE, keystoreKey, GCMParameterSpec(GCM_TAG_LENGTH, iv))
+                String(cipher.doFinal(Base64.decode(encrypted, Base64.DEFAULT)), Charsets.UTF_8)
+            } catch (_: Exception) {
+                ""
+            }
+        }
+
+        fun setUserPassword(context: Context, password: String) {
+            val prefs = context.getSharedPreferences("jotter_crypto", Context.MODE_PRIVATE)
+            val keystoreKey = getOrCreateKeystoreKey()
+            val cipher = Cipher.getInstance(ALGORITHM)
+            cipher.init(Cipher.ENCRYPT_MODE, keystoreKey)
+            val encrypted = cipher.doFinal(password.toByteArray(Charsets.UTF_8))
+            prefs.edit()
+                .putString(USER_PASSWORD_KEY, Base64.encodeToString(encrypted, Base64.DEFAULT))
+                .putString(USER_PASSWORD_IV_KEY, Base64.encodeToString(cipher.iv, Base64.DEFAULT))
+                .apply()
+        }
     }
 
     override fun onCreate(db: SQLiteDatabase) {
@@ -267,6 +335,42 @@ class JotterDb(context: Context) : SQLiteOpenHelper(context, "jotter_native.db",
         }
     }
 
+    private fun getOrCreateSalt(): ByteArray {
+        val existing = prefs.getString(SALT_KEY, null)
+        if (existing != null) return Base64.decode(existing, Base64.DEFAULT)
+        val salt = ByteArray(32).also { SecureRandom().nextBytes(it) }
+        prefs.edit().putString(SALT_KEY, Base64.encodeToString(salt, Base64.DEFAULT)).apply()
+        return salt
+    }
+
+    private fun deriveKey(password: String): SecretKeySpec {
+        val factory = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256")
+        val spec = PBEKeySpec(password.toCharArray(), getOrCreateSalt(), PBKDF2_ITERATIONS, KEY_LENGTH)
+        val secret = factory.generateSecret(spec)
+        return SecretKeySpec(secret.encoded, "AES")
+    }
+
+    private fun encryptText(plaintext: String, password: String): String {
+        val cipher = Cipher.getInstance(ALGORITHM)
+        val iv = ByteArray(12).also { SecureRandom().nextBytes(it) }
+        cipher.init(Cipher.ENCRYPT_MODE, deriveKey(password), GCMParameterSpec(GCM_TAG_LENGTH, iv))
+        val encrypted = cipher.doFinal(plaintext.toByteArray(Charsets.UTF_8))
+        return Base64.encodeToString(iv + encrypted, Base64.DEFAULT)
+    }
+
+    private fun decryptText(ciphertext: String, password: String): String {
+        return try {
+            val data = Base64.decode(ciphertext, Base64.DEFAULT)
+            val iv = data.copyOfRange(0, 12)
+            val encrypted = data.copyOfRange(12, data.size)
+            val cipher = Cipher.getInstance(ALGORITHM)
+            cipher.init(Cipher.DECRYPT_MODE, deriveKey(password), GCMParameterSpec(GCM_TAG_LENGTH, iv))
+            String(cipher.doFinal(encrypted), Charsets.UTF_8)
+        } catch (_: Exception) {
+            ciphertext
+        }
+    }
+
     private fun addColumnIfMissing(db: SQLiteDatabase, table: String, column: String, definition: String) {
         val exists = db.rawQuery("PRAGMA table_info($table)", null).use { cursor ->
             var found = false
@@ -279,55 +383,48 @@ class JotterDb(context: Context) : SQLiteOpenHelper(context, "jotter_native.db",
     }
 
     fun listNotes(query: String = "", notebookId: String? = null, tagId: String? = null, includeArchived: Boolean = false): List<Note> {
-        val selectionArgs = mutableListOf<String>()
-        val queryBuilder = StringBuilder("n.is_deleted = 0")
-
-        if (query.isNotBlank()) {
-            val q = "%${query.lowercase()}%"
-            queryBuilder.append(" AND (lower(n.title) LIKE ? OR lower(n.content) LIKE ? OR lower(a.file_name) LIKE ? OR lower(a.extracted_text) LIKE ?)")
-            repeat(4) { selectionArgs.add(q) }
-        }
-
-        if (notebookId != null) {
-            queryBuilder.append(" AND n.notebook_id = ?")
-            selectionArgs.add(notebookId)
-        }
-
-        if (tagId != null) {
-            queryBuilder.append(" AND nt.tag_id = ?")
-            selectionArgs.add(tagId)
-        }
-
-        if (!includeArchived) {
-            queryBuilder.append(" AND n.is_archived = 0")
-        }
-
         val cursor = readableDatabase.rawQuery(
-            """
-            SELECT DISTINCT n.* FROM notes n
-            LEFT JOIN attachments a ON a.note_id = n.id
-            LEFT JOIN note_tags nt ON nt.note_id = n.id
-            WHERE ${queryBuilder}
-            ORDER BY n.is_pinned DESC, n.updated_at DESC
-            """.trimIndent(),
-            selectionArgs.toTypedArray()
+            "SELECT n.* FROM notes n WHERE n.is_deleted = 0 ORDER BY n.is_pinned DESC, n.updated_at DESC",
+            null
         )
-        return cursor.use {
+        val allNotes = cursor.use {
             buildList {
                 while (it.moveToNext()) add(cursorToNote(it))
             }
+        }
+        val decrypted = allNotes.map { it.copy(title = decryptText(it.title, userPassword), content = decryptText(it.content, userPassword)) }
+        return decrypted.filter { n ->
+            if (!includeArchived && n.isArchived) return@filter false
+            if (notebookId != null && n.notebookId != notebookId) return@filter false
+            if (tagId != null) {
+                val tagMatch = readableDatabase.rawQuery(
+                    "SELECT 1 FROM note_tags WHERE note_id = ? AND tag_id = ?", arrayOf(n.id, tagId)
+                ).use { it.moveToFirst() }
+                if (!tagMatch) return@filter false
+            }
+            if (query.isNotBlank()) {
+                val q = query.lowercase()
+                val titleMatch = n.title.lowercase().contains(q)
+                val contentMatch = n.content.lowercase().contains(q)
+                if (!titleMatch && !contentMatch) return@filter false
+            }
+            true
         }
     }
 
     fun getNote(id: String): Note? {
         return readableDatabase.query("notes", null, "id=?", arrayOf(id), null, null, null).use {
-            if (it.moveToFirst()) cursorToNote(it) else null
+            if (it.moveToFirst()) {
+                val raw = cursorToNote(it)
+                raw.copy(title = decryptText(raw.title, userPassword), content = decryptText(raw.content, userPassword))
+            } else null
         }
     }
 
     fun saveNote(note: Note): Note {
         val saved = note.copy(updatedAt = System.currentTimeMillis())
-        writableDatabase.insertWithOnConflict("notes", null, saved.toValues(), SQLiteDatabase.CONFLICT_REPLACE)
+        val encrypted = saved.copy(title = encryptText(saved.title, userPassword), content = encryptText(saved.content, userPassword))
+        writableDatabase.insertWithOnConflict("notes", null, encrypted.toValues(), SQLiteDatabase.CONFLICT_REPLACE)
         syncInlineTags(saved.id, saved.content)
         addSyncOperation("note", saved.id, if (saved.syncStatus == "pending_create") "create" else "update")
         return saved
