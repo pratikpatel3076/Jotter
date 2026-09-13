@@ -273,6 +273,7 @@ async def _sync_attachment(db: AsyncSession, user_id: str, client_id: str, opera
 @router.get("/pull", response_model=SyncPullResponse)
 async def pull_sync(
     last_sync_token: Optional[str] = None,
+    since_cursor: Optional[str] = None,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -284,10 +285,23 @@ async def pull_sync(
         except ValueError:
             pass
 
-    note_query = select(Note).where(Note.user_id == current_user.id)
-    nb_query = select(Notebook).where(Notebook.user_id == current_user.id)
-    tag_query = select(Tag).where(Tag.user_id == current_user.id)
-    attachment_query = select(Attachment).where(Attachment.user_id == current_user.id)
+    since_time: Optional[datetime] = None
+    if since_cursor:
+        try:
+            since_time = datetime.fromisoformat(since_cursor.replace("Z", "+00:00"))
+        except ValueError:
+            since_time = None
+
+    note_query = select(Note).where(Note.user_id == current_user.id).order_by(Note.created_at).limit(500)
+    nb_query = select(Notebook).where(Notebook.user_id == current_user.id).order_by(Notebook.created_at).limit(500)
+    tag_query = select(Tag).where(Tag.user_id == current_user.id).order_by(Tag.created_at).limit(500)
+    attachment_query = select(Attachment).where(Attachment.user_id == current_user.id).order_by(Attachment.created_at).limit(500)
+
+    if since_time:
+        note_query = note_query.where(Note.created_at > since_time)
+        nb_query = nb_query.where(Notebook.created_at > since_time)
+        tag_query = tag_query.where(Tag.created_at > since_time)
+        attachment_query = attachment_query.where(Attachment.created_at > since_time)
 
     if since:
         note_query = note_query.where(Note.updated_at > since)
@@ -373,12 +387,17 @@ async def pull_sync(
             "updated_at": a.updated_at.isoformat() if a.updated_at else None,
         }
 
+    next_cursor: Optional[str] = None
+    if len(notes) == 500 and notes[-1].created_at:
+        next_cursor = notes[-1].created_at.isoformat()
+
     return SyncPullResponse(
         notes=[note_to_dict(n) for n in notes],
         notebooks=[nb_to_dict(nb) for nb in notebooks],
         tags=[tag_to_dict(t) for t in tags],
         attachments=[attachment_to_dict(a) for a in attachments],
         sync_token=_encode_token(current_user.id),
+        next_cursor=next_cursor,
     )
 
 

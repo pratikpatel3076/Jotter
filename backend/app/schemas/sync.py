@@ -24,6 +24,7 @@ class SyncPullResponse(BaseModel):
     tasks: list[dict] = []
     calendar_events: list[dict] = []
     sync_token: str
+    next_cursor: Optional[str] = None
     conflicts: list[dict] = []
 
 
