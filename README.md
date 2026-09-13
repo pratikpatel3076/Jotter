@@ -112,7 +112,11 @@ Jotter/
 |---|---|---|
 | `SECRET_KEY` | JWT signing key (min 32 chars) | `your-secret-key-min-32-chars` |
 | `DATABASE_URL` | Async MySQL connection string | `mysql+aiomysql://root:123456@localhost:3306/jotter_db` |
+| `SYNC_DATABASE_URL` | Async MySQL connection string for the sync engine | `mysql+aiomysql://root:123456@localhost:3306/jotter_db` |
+| `DEBUG` | Set `True` only for local development with SQLite | `False` |
 | `FRONTEND_URL` | Allowed CORS origin | `http://localhost:5173` |
+
+**MySQL is required in production.** With `DEBUG=False`, the backend refuses to start unless `SYNC_DATABASE_URL` is a MySQL URL — the app raises `ValueError: SYNC_DATABASE_URL must use MySQL in production (non-DEBUG mode)`. SQLite URLs in `DATABASE_URL`/`SYNC_DATABASE_URL` are only accepted while `DEBUG=True`.
 
 ### Frontend (`frontend/.env`)
 
