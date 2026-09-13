@@ -209,7 +209,7 @@ export async function generateRecoveryKey(masterKey: CryptoKey): Promise<Recover
 
   const dummy: WrappedMasterKey = {
     wrapped: bufToB64(wrapped),
-    salt: bufToB64(rawRecovery.buffer), // store raw recovery key bytes as "salt" for recovery
+    salt: bufToB64(randomBytes(32).buffer),
     iv: bufToB64(iv.buffer),
     algorithm: ALGORITHM,
     kdf_iterations: 1,
