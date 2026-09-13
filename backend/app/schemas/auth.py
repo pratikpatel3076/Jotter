@@ -77,7 +77,6 @@ class UserResponse(BaseModel):
 
 class AuthResponse(BaseModel):
     user: UserResponse
-    tokens: TokenResponse
     encrypted_master_key: str
 
 

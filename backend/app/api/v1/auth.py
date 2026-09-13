@@ -1,7 +1,7 @@
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 import hashlib
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update
 from google.auth.transport import requests as google_requests
@@ -12,7 +12,7 @@ from app.models.models import User, UserSession, PasswordResetToken, GoogleDrive
 from app.schemas.auth import (
     SignupRequest, LoginRequest, RefreshRequest,
     ForgotPasswordRequest, ResetPasswordRequest,
-    ChangePasswordRequest, TokenResponse, UserResponse, AuthResponse, UpdateMasterKeyRequest,
+    ChangePasswordRequest, UserResponse, AuthResponse, UpdateMasterKeyRequest,
     GoogleAuthRequest, GoogleDriveConnectRequest,
 )
 from app.core.security import (
@@ -39,11 +39,32 @@ def _make_tokens(user_id: str) -> tuple[str, str]:
     return access, refresh
 
 
+def _set_auth_cookies(response: Response, access: str, refresh: str) -> None:
+    response.set_cookie(
+        key="access_token",
+        value=access,
+        httponly=True,
+        samesite="lax",
+        secure=True,
+        path="/",
+        max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+    )
+    response.set_cookie(
+        key="refresh_token",
+        value=refresh,
+        httponly=True,
+        samesite="lax",
+        secure=True,
+        path="/",
+        max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,
+    )
+
+
 @router.post("/signup", response_model=AuthResponse, status_code=201)
-async def signup(body: SignupRequest, db: AsyncSession = Depends(get_db)):
+async def signup(body: SignupRequest, response: Response, db: AsyncSession = Depends(get_db)):
     existing = await db.scalar(select(User).where(User.email == body.email))
     if existing:
-        raise HTTPException(status_code=400, detail="Email already registered")
+        raise HTTPException(status_code=409, detail="Email already registered")
 
     user = User(
         full_name=body.full_name,
@@ -67,15 +88,16 @@ async def signup(body: SignupRequest, db: AsyncSession = Depends(get_db)):
     ))
     await db.commit()
 
+    _set_auth_cookies(response, access, refresh)
+
     return AuthResponse(
         user=UserResponse(id=user.id, email=user.email, full_name=user.full_name, is_active=user.is_active),
-        tokens=TokenResponse(access_token=access, refresh_token=refresh),
         encrypted_master_key=user.encrypted_master_key or "",
     )
 
 
 @router.post("/google", response_model=AuthResponse)
-async def google_auth(body: GoogleAuthRequest, db: AsyncSession = Depends(get_db)):
+async def google_auth(body: GoogleAuthRequest, request: Request, response: Response, db: AsyncSession = Depends(get_db)):
     if not settings.GOOGLE_CLIENT_ID:
         raise HTTPException(status_code=500, detail="Google Sign-In is not configured")
     try:
@@ -122,15 +144,16 @@ async def google_auth(body: GoogleAuthRequest, db: AsyncSession = Depends(get_db
     await db.execute(update(User).where(User.id == user.id).values(last_login_at=datetime.now(timezone.utc)))
     await db.commit()
 
+    _set_auth_cookies(response, access, refresh)
+
     return AuthResponse(
         user=UserResponse(id=user.id, email=user.email, full_name=user.full_name, is_active=user.is_active),
-        tokens=TokenResponse(access_token=access, refresh_token=refresh),
         encrypted_master_key=user.encrypted_master_key or "",
     )
 
 
 @router.post("/login", response_model=AuthResponse)
-async def login(body: LoginRequest, request: Request, db: AsyncSession = Depends(get_db)):
+async def login(body: LoginRequest, request: Request, response: Response, db: AsyncSession = Depends(get_db)):
     user = await db.scalar(select(User).where(User.email == body.email))
     if not user or not verify_password(body.password, user.hashed_password):
         raise HTTPException(status_code=401, detail="Invalid email or password")
@@ -155,24 +178,33 @@ async def login(body: LoginRequest, request: Request, db: AsyncSession = Depends
     )
     await db.commit()
 
+    _set_auth_cookies(response, access, refresh)
+
     return AuthResponse(
         user=UserResponse(id=user.id, email=user.email, full_name=user.full_name, is_active=user.is_active),
-        tokens=TokenResponse(access_token=access, refresh_token=refresh),
         encrypted_master_key=user.encrypted_master_key or "",
     )
 
 
-@router.post("/refresh", response_model=TokenResponse)
-async def refresh_token(body: RefreshRequest, db: AsyncSession = Depends(get_db)):
+@router.post("/refresh")
+async def refresh_token(
+    body: Optional[RefreshRequest] = None,
+    request: Request = None,
+    response: Response = None,
+    db: AsyncSession = Depends(get_db),
+):
+    refresh_token = body.refresh_token if body and body.refresh_token else request.cookies.get("refresh_token")
+    if not refresh_token:
+        raise HTTPException(status_code=401, detail="No refresh token")
     try:
-        payload = decode_token(body.refresh_token)
+        payload = decode_token(refresh_token)
         if payload.get("type") != "refresh":
             raise ValueError("not refresh")
         user_id = payload["sub"]
     except Exception:
         raise HTTPException(status_code=401, detail="Invalid refresh token")
 
-    token_hash = _hash_token(body.refresh_token)
+    token_hash = _hash_token(refresh_token)
     session = await db.scalar(
         select(UserSession).where(
             UserSession.refresh_token_hash == token_hash,
@@ -188,18 +220,22 @@ async def refresh_token(body: RefreshRequest, db: AsyncSession = Depends(get_db)
     session.last_active_at = datetime.now(timezone.utc)
     await db.commit()
 
-    return TokenResponse(access_token=access, refresh_token=new_refresh)
+    _set_auth_cookies(response, access, new_refresh)
+    return {"detail": "Token refreshed"}
 
 
 @router.post("/logout")
-async def logout(body: RefreshRequest, db: AsyncSession = Depends(get_db)):
-    token_hash = _hash_token(body.refresh_token)
-    session = await db.scalar(
-        select(UserSession).where(UserSession.refresh_token_hash == token_hash)
-    )
-    if session:
-        session.is_active = False
-        await db.commit()
+async def logout(response: Response, body: Optional[RefreshRequest] = None, db: AsyncSession = Depends(get_db)):
+    if body and body.refresh_token:
+        token_hash = _hash_token(body.refresh_token)
+        session = await db.scalar(
+            select(UserSession).where(UserSession.refresh_token_hash == token_hash)
+        )
+        if session:
+            session.is_active = False
+            await db.commit()
+    response.delete_cookie("access_token", path="/", secure=True, samesite="lax")
+    response.delete_cookie("refresh_token", path="/", secure=True, samesite="lax")
     return {"detail": "Logged out"}
 
 
