@@ -38,7 +38,13 @@ export function AutoSync() {
       if (syncingRef.current || !navigator.onLine) return
       syncingRef.current = true
       try {
+        setState('syncing')
         await syncNow()
+        setState('idle')
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Sync failed'
+        setState('error')
+        toast.error(msg)
       } finally {
         syncingRef.current = false
       }
