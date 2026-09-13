@@ -25,6 +25,10 @@ def _encode_token(user_id: str) -> str:
 def _parse_dt(value: Optional[str]) -> Optional[datetime]:
     if not value:
         return None
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
 
 
 def _json_text(value) -> Optional[str]:
@@ -47,12 +51,6 @@ def _json_value(value):
         return json.loads(value)
     except (TypeError, ValueError):
         return []
-    if isinstance(value, datetime):
-        return value
-    try:
-        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-    except ValueError:
-        return None
 
 
 @router.post("/push", response_model=SyncPushResponse)
