@@ -38,9 +38,7 @@ export function useAuth() {
         recovery_bundle: JSON.stringify(encrypted_with_recovery),
       })
 
-      const { user, tokens } = resp.data
-      localStorage.setItem('access_token', tokens.access_token)
-      localStorage.setItem('refresh_token', tokens.refresh_token)
+      const { user } = resp.data
 
       // 5. Save user locally
       await saveUser({
@@ -74,9 +72,7 @@ export function useAuth() {
     setError(null)
     try {
       const resp = await authApi.login({ email: data.email, password: data.password })
-      const { user, tokens, encrypted_master_key } = resp.data
-      localStorage.setItem('access_token', tokens.access_token)
-      localStorage.setItem('refresh_token', tokens.refresh_token)
+      const { user, encrypted_master_key } = resp.data
 
       // Unwrap master key
       const wrapped = JSON.parse(encrypted_master_key)
@@ -149,13 +145,11 @@ export function useAuth() {
       }
 
       const resp = await authApi.google(payload)
-      const { user, tokens, encrypted_master_key } = resp.data
+      const { user, encrypted_master_key } = resp.data
       if (!encrypted_master_key) throw new Error('No encrypted vault returned')
       const wrapped = JSON.parse(encrypted_master_key)
       const masterKey = await unwrapMasterKey(wrapped, deviceSecret)
       sessionStorage.setItem(deviceSecretKey, deviceSecret)
-      localStorage.setItem('access_token', tokens.access_token)
-      localStorage.setItem('refresh_token', tokens.refresh_token)
       await saveUser({
         id: user.id,
         email: user.email,
@@ -212,8 +206,6 @@ export function useAuth() {
     try {
       await authApi.logout()
     } catch { /* ignore */ }
-    localStorage.removeItem('access_token')
-    localStorage.removeItem('refresh_token')
     clearSessionKey()
     clearAuth()
     setNotes([])
