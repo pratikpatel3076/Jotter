@@ -16,7 +16,7 @@ Storage is encrypted at rest too. Whether a note is sitting in the browser vault
 
 - Python 3.11+
 - Node.js 18+
-- MySQL 8.0 (default credentials: root / 123456)
+- MySQL 8.0 (credentials must be set in `backend/.env`)
 
 ### 1. Database Setup
 
@@ -85,6 +85,14 @@ The native Android app extends the zero-knowledge model to on-device storage:
 3. **Decrypt in memory only** — Notes are decrypted for display; search and filtering run in memory over decrypted content instead of SQL.
 4. **No backup leaks** — The encrypted database and the keystore-wrapped password prefs are excluded from cloud backup and device transfer.
 5. **HTTPS-only sync** — Production builds default to `https://api.jotter.app/api` and reject any cleartext endpoint.
+
+## Security Hardening
+
+- AES-256-GCM encryption, zero plaintext on server
+- Android notes encrypted at rest (AES-256-GCM, PBKDF2-derived key; AndroidKeyStore wraps the stored password)
+- httpOnly cookie auth (no tokens in localStorage)
+- CSP declared in `index.html` meta tag (not an HTTP response header)
+- Google Drive tokens encrypted at rest (Fernet)
 
 ## Project Layout
 
@@ -157,6 +165,6 @@ Jotter/
 | Crypto | Web Crypto API, AndroidKeyStore (AES-256-GCM, PBKDF2) |
 | Server | FastAPI, Python |
 | Database | MySQL 8.0, SQLAlchemy async |
-| Auth | JWT access + refresh tokens, bcrypt |
+| Auth | httpOnly cookies, JWT (access + refresh), bcrypt |
 | Mobile | Capacitor, Kotlin |
 | PWA | vite-plugin-pwa, service workers |
