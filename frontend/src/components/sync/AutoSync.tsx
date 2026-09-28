@@ -26,10 +26,15 @@ export function AutoSync() {
       setFailedCount(queue.filter((item) => item.status === 'failed').length)
     }
 
-    refreshQueueHealth().catch(() => {})
-    const timer = window.setInterval(() => refreshQueueHealth().catch(() => {}), 15_000)
+    function handleQueueHealthError(err: unknown) {
+      console.error('Queue health check failed:', err)
+      setState('error')
+    }
+
+    refreshQueueHealth().catch(handleQueueHealthError)
+    const timer = window.setInterval(() => refreshQueueHealth().catch(handleQueueHealthError), 15_000)
     return () => window.clearInterval(timer)
-  }, [user, setPendingCount, setFailedCount])
+  }, [user, setPendingCount, setFailedCount, setState])
 
   useEffect(() => {
     if (!user || !isVaultOpen()) return
