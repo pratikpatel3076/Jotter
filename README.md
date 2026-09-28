@@ -34,9 +34,14 @@ python -m venv venv
 venv\Scripts\activate          # Windows
 # source venv/bin/activate     # macOS / Linux
 
+copy .env.example .env         # Windows
+# cp .env.example .env         # macOS / Linux
+
 pip install -r requirements.txt
 uvicorn app.main:app --reload --port 8000
 ```
+
+`.env` is gitignored; `.env.example` is the committed template. Set `SECRET_KEY` to a unique 32+ character value before running.
 
 ### 3. Frontend
 
@@ -112,7 +117,7 @@ Jotter/
 |---|---|---|
 | `SECRET_KEY` | JWT signing key (min 32 chars) | `your-secret-key-min-32-chars` |
 | `DATABASE_URL` | Async MySQL connection string | `mysql+aiomysql://root:123456@localhost:3306/jotter_db` |
-| `DEBUG` | Set `True` only for local development with SQLite | `False` |
+| `DEBUG` | Set `True` only for local development with SQLite | `True` |
 | `FRONTEND_URL` | Allowed CORS origin | `http://localhost:5173` |
 
 ### Frontend (`frontend/.env`)
