@@ -65,6 +65,23 @@ npx cap open android
 
 Open the project in Android Studio and run from there.
 
+## Running with Docker
+
+### Prerequisites
+
+- Docker Desktop
+
+### Steps
+
+1. Copy `.env.docker` and fill in real values for `SECRET_KEY` and `MYSQL_ROOT_PASSWORD`
+2. `docker compose up --build`
+3. App runs at http://localhost
+
+Step 1 replaces `REPLACE_THIS_TOO` in three places — `MYSQL_ROOT_PASSWORD`, `DATABASE_URL` and `SYNC_DATABASE_URL`. Compose reads this file literally, so the password is not shared between them automatically.
+
+To stop: `docker compose down`
+To wipe the database volume: `docker compose down -v`
+
 ## How Encryption Works
 
 Jotter uses a zero-knowledge architecture. Here's the chain:
