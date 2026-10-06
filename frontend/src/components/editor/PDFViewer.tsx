@@ -36,7 +36,7 @@ export function PDFViewer({ url, data, fileName, className }: Props) {
         if (data) {
           loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(data) })
         } else if (url) {
-          loadingTask = pdfjsLib.getDocument(url)
+          loadingTask = pdfjsLib.getDocument({ url })
         } else {
           return
         }

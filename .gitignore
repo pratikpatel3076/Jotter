@@ -58,3 +58,4 @@ logs/
 !.env.docker
 
 .fake
+venv312/
