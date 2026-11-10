@@ -101,10 +101,10 @@ export default function ResetPasswordPage() {
                 onChange={(e) => setUseRecovery(e.target.checked)}
                 className="h-4 w-4 accent-primary"
               />
-              Recover encrypted notes with recovery key
+              Recovery key (currently has no effect)
             </label>
             <p className="text-xs text-muted-foreground mb-2">
-              Without your recovery key, existing encrypted notes cannot be decrypted after reset.
+              Resetting your password will make your existing synced notes unreadable. The recovery key does not restore them yet.
             </p>
             {useRecovery && (
               <Input

@@ -49,7 +49,7 @@ export default function ForgotPasswordPage() {
               Check your inbox and follow the instructions.
             </p>
             <div className="rounded-xl border border-amber-700/30 bg-amber-950/20 p-3 text-xs text-amber-400 mb-6">
-              <strong>Important:</strong> If you use client-side encryption, you'll need your recovery key to re-access your existing notes after resetting.
+              <strong>Warning:</strong> resetting your password currently makes your existing synced notes unreadable. Recovery is not implemented yet.
             </div>
             <Link to="/login">
               <Button variant="outline" className="w-full gap-2">

@@ -57,7 +57,7 @@ export default function SignupPage() {
           </div>
 
           <p className="mb-4 text-sm text-muted-foreground">
-            This key can recover your encrypted notes if you forget your password.
+            This key is meant to recover your encrypted notes if you forget your password, but recovery is not implemented yet — it currently has no effect.
             Store it somewhere safe — a password manager, printed paper, or offline backup.
           </p>
 

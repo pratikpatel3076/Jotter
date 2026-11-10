@@ -90,7 +90,7 @@ Jotter uses client-side encryption. Here's the chain:
 2. **Master key** — A random master key is generated on signup and encrypted with your derived key. The server stores this encrypted blob along with the salt used for derivation.
 3. **Note encryption** — Each note is encrypted individually with AES-256-GCM using the master key.
 4. **Server storage** — Note titles, content, and attachment bytes reach the backend as ciphertext, but the backend also receives your password at signup/login and holds the wrapped master key, so it can decrypt content. See [Security model](#security-model).
-5. **Recovery** — A 32-byte hex recovery key lets you regain access if you forget your password, without losing data.
+5. **Recovery** — A 32-byte hex recovery key is generated at signup, but recovery is not implemented (see Security model).
 6. **Offline auth** — The local vault stores enough encrypted material to authenticate without the server.
 
 ### Android at-rest encryption
@@ -113,11 +113,11 @@ Jotter is client-side encrypted at rest. It is not zero-knowledge. Here is exact
 - Note titles and bodies, notebook titles, tag names, and attachment file names, bytes, and search text are encrypted in the client with AES-256-GCM under a random per-user master key before sync. The server stores these fields as ciphertext.
 - The master key is wrapped with a key derived from your password via PBKDF2 (310k iterations, SHA-256). The browser keeps the unwrapped master key in memory only for the logged-in session.
 - Local storage holds ciphertext too: the browser vault (IndexedDB) and the Android `notes` table both store encrypted titles and content.
-- A 32-byte recovery key lets you unwrap the master key if you forget your password.
+- A recovery key is generated at signup, but recovery is not implemented (see Known bugs).
 
 ### What is not protected
 
-- **The server receives your raw password.** Signup, login, and password change send the password in the request body, and the server verifies it with bcrypt. A malicious or compromised server, or anything that logs request bodies (proxies, debug tooling), can capture it.
+- **The server receives your raw password.** Signup, login, password change, and password reset send the password in the request body, and the server verifies it with bcrypt. A malicious or compromised server, or anything that logs request bodies (proxies, debug tooling), can capture it.
 - **The server stores the wrapped master key and the PBKDF2 salt.** Combined with a captured password, that is enough to derive the wrap key, unwrap the master key, and decrypt every synced note and attachment.
 - **A database leak alone enables offline password guessing** against the wrapped master key, with each guess verified by the AES-GCM authentication tag.
 - **Metadata is synced and stored in plaintext**: note type, the source URL of clipped pages, category names, colors, icons, sort order, reminder/due timestamps, pin/favorite/archive flags, notebook and tag metadata, attachment MIME type and size, your email and full name, share recipient emails, and session metadata (device name, IP address, user agent).
@@ -132,6 +132,13 @@ Jotter is client-side encrypted at rest. It is not zero-knowledge. Here is exact
 - Auth tokens are delivered as httpOnly cookies, but the refresh and logout endpoints also accept a JWT in the JSON body, and the backend still defines an unused token-in-body response schema.
 - The CSP is declared in an `index.html` meta tag, not an HTTP response header.
 - PBKDF2 runs at 310k iterations, below current OWASP guidance of 600k.
+
+### Known bugs
+
+- Password reset and password change update only the bcrypt hash and do not re-wrap the master key, so login after a reset fails and previously synced notes become unreadable. The recovery key is collected on reset but ignored.
+- The native Android app's sync pushes decrypted note content.
+
+Both are tracked in the repository's Issues.
 
 **Status:** personal-use project, not deployed publicly, not independently audited.
 
