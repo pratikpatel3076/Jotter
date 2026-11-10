@@ -120,7 +120,7 @@ export default function LoginPage() {
       </div>
 
       <p className="mt-6 max-w-sm text-center text-xs text-muted-foreground/60">
-        Your notes are encrypted end-to-end. We never see your content.
+        Your notes are encrypted on this device before they sync.
       </p>
     </div>
   )

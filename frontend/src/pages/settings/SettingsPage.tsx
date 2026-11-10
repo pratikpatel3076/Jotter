@@ -112,7 +112,7 @@ export default function SettingsPage() {
             <SettingsRow
               icon={<Shield className="h-4 w-4" />}
               label="Encryption Info"
-              description="AES-256-GCM end-to-end encryption"
+              description="AES-256-GCM client-side encryption"
             />
           </div>
         </section>
@@ -267,7 +267,7 @@ export default function SettingsPage() {
         </section>
 
         <p className="text-center text-xs text-muted-foreground/40 pb-4">
-          Jotter v1.0.0 — End-to-end encrypted
+          Jotter v1.0.0 — Client-side encrypted
         </p>
       </div>
 
