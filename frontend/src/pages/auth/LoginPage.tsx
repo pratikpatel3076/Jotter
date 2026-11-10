@@ -120,7 +120,7 @@ export default function LoginPage() {
       </div>
 
       <p className="mt-6 max-w-sm text-center text-xs text-muted-foreground/60">
-        Your notes are encrypted on this device before they sync.
+        Notes are encrypted on this device before the web app syncs them.
       </p>
     </div>
   )
