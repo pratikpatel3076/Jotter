@@ -1,10 +1,10 @@
 # Jotter
 
-Your notes, your keys, your data. Jotter is a privacy-first notes application where every piece of content is encrypted on your device before it ever touches a server. Not even the backend can read what you write.
+Your notes, your keys, your data. Jotter encrypts note titles and content on your device with AES-256-GCM and syncs them as ciphertext. This is client-side encryption at rest, not zero-knowledge: the server receives your password at login and stores the wrapped master key, so a malicious server could decrypt your data. See [Security model](#security-model) for exactly what is and isn't protected.
 
 ## What Jotter Does
 
-Jotter combines the convenience of a modern notes app with genuine end-to-end encryption. Write rich-text notes, build checklists, clip web pages, and organize everything into notebooks and tags — all while keeping your data locked down with AES-256-GCM.
+Jotter combines the convenience of a modern notes app with client-side encryption of note content. Write rich-text notes, build checklists, clip web pages, and organize everything into notebooks and tags — content is locked down with AES-256-GCM before it leaves your device, though metadata syncs in the clear (see [Security model](#security-model)).
 
 The app works offline by default. Notes live in IndexedDB (browser) or SQLite (mobile) and sync to the server only when you're connected. If you go offline for a week, nothing breaks.
 
@@ -84,32 +84,66 @@ To wipe the database volume: `docker compose down -v`
 
 ## How Encryption Works
 
-Jotter uses a zero-knowledge architecture. Here's the chain:
+Jotter uses client-side encryption. Here's the chain:
 
 1. **Key derivation** — Your password is fed through PBKDF2 (310k iterations, SHA-256) to produce a derived key.
-2. **Master key** — A random master key is generated on signup and encrypted with your derived key. The server stores this encrypted blob.
+2. **Master key** — A random master key is generated on signup and encrypted with your derived key. The server stores this encrypted blob along with the salt used for derivation.
 3. **Note encryption** — Each note is encrypted individually with AES-256-GCM using the master key.
-4. **Server storage** — Only ciphertext reaches the backend. It has no ability to decrypt anything.
+4. **Server storage** — Note titles, content, and attachment bytes reach the backend as ciphertext, but the backend also receives your password at signup/login and holds the wrapped master key, so it can decrypt content. See [Security model](#security-model).
 5. **Recovery** — A 32-byte hex recovery key lets you regain access if you forget your password, without losing data.
 6. **Offline auth** — The local vault stores enough encrypted material to authenticate without the server.
 
 ### Android at-rest encryption
 
-The native Android app extends the zero-knowledge model to on-device storage:
+The native Android app applies the same client-side encryption to on-device storage:
 
 1. **Keystore-wrapped password** — Your app password is encrypted with a hardware-backed AndroidKeyStore AES-256 key (StrongBox where available) and stored in protected prefs.
 2. **Encrypted SQLite** — Note titles and content in `jotter_native.db` are AES-256-GCM encrypted with a key derived from your password via PBKDF2 (310k iterations, SHA-256).
 3. **Decrypt in memory only** — Notes are decrypted for display; search and filtering run in memory over decrypted content instead of SQL.
 4. **No backup leaks** — The encrypted database and the keystore-wrapped password prefs are excluded from cloud backup and device transfer.
 5. **HTTPS-only sync** — Production builds default to `https://api.jotter.app/api` and reject any cleartext endpoint.
+6. **Sync caveat** — The native sync client pushes notes after decrypting them, so content synced from the Android app reaches the server as plaintext. Local task, attachment, comment, and calendar-link rows are also stored unencrypted. See [Security model](#security-model).
+
+## Security model
+
+Jotter is client-side encrypted at rest. It is not zero-knowledge. Here is exactly what that means.
+
+### What is protected
+
+- Note titles and bodies, notebook titles, tag names, and attachment file names, bytes, and search text are encrypted in the client with AES-256-GCM under a random per-user master key before sync. The server stores these fields as ciphertext.
+- The master key is wrapped with a key derived from your password via PBKDF2 (310k iterations, SHA-256). The browser keeps the unwrapped master key in memory only for the logged-in session.
+- Local storage holds ciphertext too: the browser vault (IndexedDB) and the Android `notes` table both store encrypted titles and content.
+- A 32-byte recovery key lets you unwrap the master key if you forget your password.
+
+### What is not protected
+
+- **The server receives your raw password.** Signup, login, and password change send the password in the request body, and the server verifies it with bcrypt. A malicious or compromised server, or anything that logs request bodies (proxies, debug tooling), can capture it.
+- **The server stores the wrapped master key and the PBKDF2 salt.** Combined with a captured password, that is enough to derive the wrap key, unwrap the master key, and decrypt every synced note and attachment.
+- **A database leak alone enables offline password guessing** against the wrapped master key, with each guess verified by the AES-GCM authentication tag.
+- **Metadata is synced and stored in plaintext**: note type, the source URL of clipped pages, category names, colors, icons, sort order, reminder/due timestamps, pin/favorite/archive flags, notebook and tag metadata, attachment MIME type and size, your email and full name, share recipient emails, and session metadata (device name, IP address, user agent).
+- **Some data types are not encrypted at all.** The backend defines plaintext columns and API routes for task titles, saved-search labels and queries, and calendar-event titles, locations, and attendees. The web app currently keeps these local-only, but anything sent through those routes is stored unencrypted.
+- **The native Android app syncs decrypted content.** It decrypts note title and content before pushing them to the server, so notes synced from the Android shell are stored server-side as plaintext. Its local tasks, attachments, comments, and calendar links are also unencrypted in SQLite.
+- **Google Drive tokens** are Fernet-encrypted at rest, but under the server's own `SECRET_KEY`, so the server can decrypt them.
+
+### Known accepted risks
+
+- No rate limiting on the auth endpoints.
+- No email verification at signup.
+- Auth tokens are delivered as httpOnly cookies, but the refresh and logout endpoints also accept a JWT in the JSON body, and the backend still defines an unused token-in-body response schema.
+- The CSP is declared in an `index.html` meta tag, not an HTTP response header.
+- PBKDF2 runs at 310k iterations, below current OWASP guidance of 600k.
+
+**Status:** personal-use project, not deployed publicly, not independently audited.
+
+A stronger design that never sends the password or the wrapping key to the server is being explored in a separate project called Parley.
 
 ## Security Hardening
 
-- AES-256-GCM encryption, zero plaintext on server
+- AES-256-GCM client-side encryption of note titles, content, and attachment data (metadata and some data types stay plaintext — see [Security model](#security-model))
 - Android notes encrypted at rest (AES-256-GCM, PBKDF2-derived key; AndroidKeyStore wraps the stored password)
 - httpOnly cookie auth (no tokens in localStorage)
 - CSP declared in `index.html` meta tag (not an HTTP response header)
-- Google Drive tokens encrypted at rest (Fernet)
+- Google Drive tokens encrypted at rest (Fernet, under the server's `SECRET_KEY`)
 
 ## Project Layout
 
@@ -156,7 +190,7 @@ Jotter/
 | Feature | Status |
 |---|---|
 | Signup, login, password reset | Shipped |
-| End-to-end AES-256-GCM encryption | Shipped |
+| Client-side AES-256-GCM note encryption | Shipped |
 | On-device note encryption (Android) | Shipped |
 | Offline-first with sync queue | Shipped |
 | Rich text editing (TipTap) | Shipped |
