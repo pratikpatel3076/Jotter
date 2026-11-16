@@ -142,7 +142,7 @@ Both are tracked in the repository's Issues.
 
 **Status:** personal-use project, not deployed publicly, not independently audited.
 
-A stronger design that never sends the password or the wrapping key to the server is being explored in a separate project called Parley.
+A stronger design that never sends the password or the wrapping key to the server is implemented in a separate project: [Parley](https://github.com/pratikpatel3076/parley) (experimental, not audited).
 
 ## Security Hardening
 
